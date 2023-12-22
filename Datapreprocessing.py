@@ -21,7 +21,7 @@ for task_type in task_types:  # Add more task types as needed
 
         # Process the file
         with h5py.File(file_path, 'r') as f:
-            dataset_name = get_dataset_name(file_path)
+            dataset_name = get_dataset_name(f ile_path)
             matrix = f.get(dataset_name)[()]
             # Reshape the matrix to a 1D array if needed
 

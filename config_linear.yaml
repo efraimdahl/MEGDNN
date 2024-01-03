@@ -1,0 +1,19 @@
+model: MEGNet
+data_dir: /Users/timofeysenchenko/UU/projects/MEG/MEGDNN/Final Project data
+log: wandb
+wandb_api_key: 4db50afc0625bffece93d0ab9edb0e63c4728018
+validation: [cross, intra]
+n_sensors: 248
+n_timesteps: 35624
+downsample: 5
+window_size: 1000
+hidden_size: 512
+negative_slope: 0.01
+dropout: 0.5
+n_layers: 3
+num_classes: 4
+lr: 0.001
+warmup_epochs: 5
+epochs: 15
+steps_per_epoch: 2
+batch_size: 16

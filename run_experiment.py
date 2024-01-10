@@ -23,6 +23,7 @@ if __name__ == '__main__':
         print(f'successfully loaded config file {args.config}')
     
     # read datasets
+    # creating a dictionary to encode the different tasks
     data = read_datasets(config['data_dir'])
     encoder_dict = {
         'rest': 0,
@@ -32,6 +33,7 @@ if __name__ == '__main__':
     }
     decoder_dict = {v: k for k, v in encoder_dict.items()}
 
+    # creates a log of the data in wandb to visualise the data
     if config['log'] in ['wandb', 'all']:
         wandb.login(key = config['wandb_api_key'])
     
@@ -40,7 +42,7 @@ if __name__ == '__main__':
         os.makedirs('weights')
 
 
-    # preprocess data and train model
+    # preprocess data and train model for the intra subject run
     if 'intra' in config['validation']:
             # initialize wandb
         if config['log'] in ['wandb', 'all']:
@@ -50,14 +52,17 @@ if __name__ == '__main__':
             wandb.init(project='MEG', config=config, name = run_name)
 
         
+        #Extract test and training data from the dataset
         X_train, y_train = data['intra']['X_train'], data['intra']['y_train']
         X_test, y_test = data['intra']['X_test'], data['intra']['y_test']
         y_train = [encoder_dict[label] for label in y_train]
         y_test = [encoder_dict[label] for label in y_test]
 
+        #Scale the data
         X_train_scaled, X_test_scaled = fit_transform_scaler(X_train, [X_test], scaler=StandardScaler())
         X_test_scaled = X_test_scaled[0]
 
+        #Downsample 
         X_train = temporal_downsampling(X_train_scaled, downsample_factor=config['downsample'])
         X_test = temporal_downsampling(X_test_scaled, downsample_factor=config['downsample'])
         

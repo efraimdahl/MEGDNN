@@ -10,10 +10,13 @@ class MEGNet(pl.LightningModule):
         super(MEGNet, self).__init__()
         self.config = config
         self.layers = nn.ModuleList()
+        # calculates input size based on the configuration
         if config['window_size'] != -1:
             input_size = config['window_size']*config['n_sensors']
         else:
             input_size = config['n_timesteps']//config['downsample']*config['n_sensors']
+        
+        # defines the layers for the neural network
         self.layers.append(nn.Linear(input_size, config['hidden_size']))
         self.layers.append(nn.BatchNorm1d(config['hidden_size']))
         self.layers.append(nn.LeakyReLU(config['negative_slope']))
@@ -26,17 +29,30 @@ class MEGNet(pl.LightningModule):
             self.layers.append(nn.Dropout(config['dropout']))
         self.layers.append(nn.Linear(config['hidden_size'], config['num_classes']))
 
+        # defines the loss criterion and initialises variables for the training curves
         self.criterion = nn.CrossEntropyLoss()
         self.train_loss = 0.0
         self.val_loss = 0.0
         self.val_progress = []
+        self.best_acc = 0.0
+        self.best_f1 = 0.0
 
     def forward(self, x):
+        """
+        Performs a forward pass of the defined neural network.
+        """
         for layer in self.layers:
             x = layer(x)
         return x
     
     def training_step(self, batch, batch_idx):
+        """
+        Training step for MEGNet.
+
+        :param batch: Batch of training data.
+        :param batch_idx: Index of the current batch.
+        :returns: loss: The training loss.
+        """
         x, y = batch
         logits = self(x)
         loss = self.criterion(logits, y)
@@ -45,6 +61,13 @@ class MEGNet(pl.LightningModule):
         return loss
     
     def validation_step(self, batch, batch_idx):
+        """
+        Validation step for MEGNet.
+
+        :param batch: Batch of training data.
+        :param batch_idx: Index of the current batch.
+        :returns: loss: The validation loss.
+        """
         x, y = batch
         logits = self(x)
         loss = self.criterion(logits, y)
@@ -56,12 +79,18 @@ class MEGNet(pl.LightningModule):
         return loss
     
     def on_validation_epoch_end(self):
+        """
+        Validation callback for pl trainer.
+        Calculates and logs train loss and validation metrics.
+        """
         # calculate accuracy on full validation set
         preds = torch.cat([pred for pred, y in self.val_progress], dim=0)
         y = torch.cat([y for pred, y in self.val_progress], dim=0)
         preds = torch.argmax(preds, dim=1)
         acc = torch.sum(preds == y).item() / len(y)
         precision, recall, f1, _ = precision_recall_fscore_support(y.cpu(), preds.cpu(), average='macro')
+
+        # log metrics based on configuration settings
         if self.config['log'] in ['wandb', 'all']:
             wandb.log({'train_loss': self.train_loss, 'val_loss': self.val_loss, 'val_acc': acc, 'val_precision': precision, 'val_recall': recall, 'val_f1': f1})
         if self.config['log'] in ['stdout', 'all']:
@@ -71,6 +100,17 @@ class MEGNet(pl.LightningModule):
             print(f'Validation precision: {precision}')
             print(f'Validation recall: {recall}')
             print(f'Validation f1: {f1}')
+        
+        # saved best model, based on chosen target metric if save_best is set to True
+        if self.config['save_best']:
+            if self.config['target_metric'] == 'accuracy' and acc > self.best_acc:
+                self.best_acc = acc
+                save_checkpoint(self, 'weights/'+self.config['run_name']+'.pth')
+            elif self.config['target_metric'] == 'f1' and f1 > self.best_f1:
+                self.best_f1 = f1
+                save_checkpoint(self, 'weights/'+self.config['run_name']+'.pth')
+        
+        # reset variables for next epoch
         self.val_progress = []
         self.val_loss = 0.0
         self.train_loss = 0.0
@@ -83,6 +123,9 @@ class MEGNet(pl.LightningModule):
 
 
 class MEGConvNet(pl.LightningModule):
+    """
+    MEGConvNet - Convolutional Neural Network, each block contains 1-d convolution, batch normalization, leaky ReLU and max pooling.
+    """
     def __init__(self, config):
         super(MEGConvNet, self).__init__()
         self.config = config
@@ -95,11 +138,15 @@ class MEGConvNet(pl.LightningModule):
         
         current_size = input_size
         for _ in range(config['n_layers']):
+            # calculates the size after convolution
             current_size = ((current_size - config['kernel_size'] + 2 * config['padding']) // config['stride']) + 1
+            # calculates the size after max pooling
             current_size = (current_size - config['pooling_size']) // config['pooling_size'] + 1
+        
+        # calculates the input size for the fully connected layer
         fc_input_size = current_size * config['out_channels']
-        print(fc_input_size)
 
+        # defines convolutional layers
         layers = []
         in_channels = config['n_sensors']
         for _ in range(config['n_layers']):
@@ -113,19 +160,33 @@ class MEGConvNet(pl.LightningModule):
 
         self.conv_layers = nn.Sequential(*layers)
 
+        # defines final fully connected layer
         self.fc = nn.Linear(fc_input_size, config['num_classes'])
-
+        
+        # defines loss criterion and initialises variables for training curves
         self.train_loss = 0.0
         self.val_loss = 0.0
         self.val_progress = []
+        self.best_acc = 0.0
+        self.best_f1 = 0.0
 
     def forward(self, x):
+        """
+        Performs a forward pass of the defined neural network.
+        """
         x = self.conv_layers(x)
         x = torch.flatten(x, 1)
         x = self.fc(x)
         return x
 
     def training_step(self, batch, batch_idx):
+        """
+        Training step for MEGConvNet.
+
+        :param batch: Batch of training data.
+        :param batch_idx: Index of the current batch.
+        :returns: loss: The training loss.
+        """
         x, y = batch
         logits = self(x)
         loss = F.cross_entropy(logits, y)
@@ -133,6 +194,13 @@ class MEGConvNet(pl.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
+        """
+        Validation step for MEGConvNet.
+
+        :param batch: Batch of training data.
+        :param batch_idx: Index of the current batch.
+        :returns: loss: The validation loss.
+        """
         x, y = batch
         logits = self(x)
         loss = F.cross_entropy(logits, y)
@@ -143,12 +211,18 @@ class MEGConvNet(pl.LightningModule):
         return loss
     
     def on_validation_epoch_end(self):
+        """
+        Validation callback for pl trainer.
+        Calculates and logs train loss and validation metrics.
+        """
         # calculate accuracy on full validation set
         preds = torch.cat([pred for pred, y in self.val_progress], dim=0)
         y = torch.cat([y for pred, y in self.val_progress], dim=0)
         preds = torch.argmax(preds, dim=1)
         acc = torch.sum(preds == y).item() / len(y)
         precision, recall, f1, _ = precision_recall_fscore_support(y.cpu(), preds.cpu(), average='macro')
+
+        # log metrics based on configuration settings
         if self.config['log'] in ['wandb', 'all']:
             wandb.log({'train_loss': self.train_loss, 'val_loss': self.val_loss, 'val_acc': acc, 'val_precision': precision, 'val_recall': recall, 'val_f1': f1})
         if self.config['log'] in ['stdout', 'all']:
@@ -158,6 +232,17 @@ class MEGConvNet(pl.LightningModule):
             print(f'Validation precision: {precision}')
             print(f'Validation recall: {recall}')
             print(f'Validation f1: {f1}')
+        
+        # saved best model, based on chosen target metric if save_best is set to True
+        if self.config['save_best']:
+            if self.config['target_metric'] == 'accuracy' and acc > self.best_acc:
+                self.best_acc = acc
+                save_checkpoint(self, 'weights/'+self.config['run_name']+'.pth')
+            elif self.config['target_metric'] == 'f1' and f1 > self.best_f1:
+                self.best_f1 = f1
+                save_checkpoint(self, 'weights/'+self.config['run_name']+'.pth')
+        
+         # reset variables for next epoch
         self.val_progress = []
         self.val_loss = 0.0
         self.train_loss = 0.0
@@ -170,6 +255,12 @@ class MEGConvNet(pl.LightningModule):
 
 
 def save_checkpoint(model, path):
+    """
+    Saves a checkpoint, optimizer, and scheduler from a specified path.
+
+    :param model: The model to load the checkpoint into.
+    :param path: The file path from which to load the checkpoint.
+    """
     torch.save({
         'model_state_dict': model.state_dict(),
         'optimizer_state_dict': model.optimizer.state_dict(),
@@ -178,6 +269,12 @@ def save_checkpoint(model, path):
 
 
 def load_checkpoint(model, path):
+    """
+    Loads a checkpoint, optimizer, and scheduler from a specified path.
+
+    :param model: The model to load the checkpoint into.
+    :param path: The file path from which to load the checkpoint.
+    """
     checkpoint = torch.load(path)
     model.load_state_dict(checkpoint['model_state_dict'])
     model.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])

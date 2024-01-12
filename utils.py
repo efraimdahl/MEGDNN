@@ -2,6 +2,8 @@ import h5py
 from os import listdir
 import torch
 from torch.utils.data import Dataset, DataLoader
+from sklearn.metrics import accuracy_score, precision_recall_fscore_support
+from sklearn.preprocessing import StandardScaler
 import numpy as np
 
 
@@ -150,3 +152,53 @@ def batchify_activity(X, y, window_size = 200):
             y_batched.append(y[i])
 
     return X_batched, y_batched 
+
+
+def error_analysis(model, data, encoder_dict, config):
+    '''
+    Performs error analysis on each cross test set 
+    and calculates the missclassification rate for each class and the percentages for which classes they are missclassified as.
+    '''
+    decoder_dict = {v: k for k, v in encoder_dict.items()}
+    # iterate over the three cross test sets and perform error analysis for each subject
+    for i in ['1', '2', '3']:
+        X = data['cross']['X_test'+i]
+        y = data['cross']['y_test'+i]
+        y = [encoder_dict[label] for label in y]
+        X_scaled = fit_transform_scaler(data['cross']['X_train'], [X], scaler=StandardScaler())[1][0]
+        X = temporal_downsampling(X_scaled, downsample_factor=config['downsample'])
+        if config['window_size'] != -1:
+            X, y = batchify_activity(X, y, window_size = config['window_size'])
+        if config['model'] != 'MEGConvNet':
+            X = [x.flatten() for x in X]
+        test_set = MEGDataset(X, y)
+        test_loader = DataLoader(test_set, batch_size=config['batch_size'])
+        model.eval()
+        preds = []
+        for inputs, labels in test_loader:
+            inputs = inputs.to(model.device)
+            labels = labels.to(model.device)
+            with torch.no_grad():
+                output = model(inputs)
+                preds.extend(output.argmax(dim=1).tolist())
+        acc = accuracy_score(y, preds)
+        precision, recall, f1, _ = precision_recall_fscore_support(y, preds, average='macro')
+        print(f'Subject {i}:\n')
+        print(f'Accuracy: {acc}')
+        print(f'Precision: {precision}')
+        print(f'Recall: {recall}')
+        print(f'F1: {f1}')
+        y = [decoder_dict[label] for label in y]
+        preds = [decoder_dict[label] for label in preds]
+
+        # calculates missclassification rate for each class and percentages for which classes they are missclassified as
+        for label in encoder_dict.keys():
+            print(f'Class {label}:')
+            missclassified = [preds[i] for i in range(len(preds)) if preds[i] != y[i] and y[i] == label]
+            print(f'Missclassification rate: {len(missclassified)/y.count(label)}')
+            print(f'Missclassified as:')
+            for miss in encoder_dict.keys():
+                if miss != label and len(missclassified) > 0:
+                    print(f'{miss}: {missclassified.count(miss)/len(missclassified)}')
+            print('\n')
+        print('\n')

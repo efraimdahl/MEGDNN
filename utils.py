@@ -6,6 +6,12 @@ import numpy as np
 
 
 def get_dataset_name(file_path):
+    """
+    Extracts the dataset name from a given file path.
+
+    :param file_path: The complete file path, including the file name.
+    :return: dataset_name: The extracted dataset name, obtained by removing the last part of the file name and joining the remaining parts with underscores.
+    """
     file_name = file_path.split('/')[-1]
     temp = file_name.split('_')[:-1]
     dataset_name = "_".join(temp)
@@ -13,9 +19,19 @@ def get_dataset_name(file_path):
 
 
 def read_datasets(data_dir):
+    """
+    Reads the datasets form a given directory.
+    For both intra and cross, it extracts the datasets and labels.
+
+    :param data_dir: The path to the directory containing dataset files.
+    :return: datasets: A dictionary containing intra and cross datasets, each with train and test sets.
+
+    """
     datasets = dict()
     datasets['intra'] = {'X_train': [], 'y_train':[], 'X_test': [], 'y_test': []}
     datasets['cross'] ={'X_train': [], 'y_train': [], 'X_test1': [], 'y_test1': [], 'X_test2': [], 'y_test2': [], 'X_test3': [], 'y_test3': []}
+    
+    # process Cross datasets
     for file in listdir(data_dir+'/Cross'):
         set_type = file
         set_path = data_dir+'/Cross/'+file
@@ -23,11 +39,12 @@ def read_datasets(data_dir):
             for file in listdir(set_path):
                 file_path = set_path+'/'+file
                 with h5py.File(file_path, 'r') as f:
-                    matrix = f.get(get_dataset_name(file_path))[()]
+                    matrix = f.get(get_dataset_name(file_path))[()] # extracts dataset matrix
                     datasets['cross']['X_'+set_type].append(matrix)
-                    label = file.split('_')[:-2]
+                    label = file.split('_')[:-2] # extracts dataset label
                     datasets['cross']['y_'+set_type].append('_'.join(label))
     
+    # process Intra datasets
     for file in listdir(data_dir+'/Intra'):
         set_type = file
         set_path = data_dir+'/Intra/'+file
@@ -35,9 +52,9 @@ def read_datasets(data_dir):
             for file in listdir(set_path):
                 file_path = set_path+'/'+file
                 with h5py.File(file_path, 'r') as f:
-                    matrix = f.get(get_dataset_name(file_path))[()]
+                    matrix = f.get(get_dataset_name(file_path))[()] # extracts dataset matrix
                     datasets['intra']['X_'+set_type].append(matrix)
-                    label = file.split('_')[:-2]
+                    label = file.split('_')[:-2] # extracts dataset label
                     datasets['intra']['y_'+set_type].append('_'.join(label))
     
     return datasets
@@ -45,12 +62,20 @@ def read_datasets(data_dir):
 
 class MEGDataset(Dataset):
     def __init__(self, matrices, labels, transform=None):
+        """
+        Custom PyTorch dataset for MEG data.
+
+        :param matrices: List of numpy arrays representing MEG matrices.
+        :param labels: List of corresponding labels for each matrix.
+        :param transform: A transformation to be applied to the matrix data.
+        """
         self.matrices = matrices
         self.labels = labels
         self.transform = transform
     
     def __len__(self):
-        return len(self.matrices)
+        # returns the number of samples
+        return len(self.matrices) 
     
     def __getitem__(self, idx):
         # read matrix and label, turn to torch tensor, apply transformation if needed

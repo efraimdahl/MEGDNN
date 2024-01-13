@@ -265,7 +265,7 @@ class LSTMNet(pl.LightningModule):
         super(LSTMNet, self).__init__()
         self.config = config
 
-        # calculate input size for the final fully connected layer
+        # calculates input size for the final fully connected layer
         if config['window_size'] != -1:
             input_size = config['window_size']
         else:
@@ -273,11 +273,15 @@ class LSTMNet(pl.LightningModule):
         
         current_size = input_size
         for _ in range(config['n_layers']):
+            # calculates the size after convolution
             current_size = ((current_size - config['kernel_size'] + 2 * config['padding']) // config['stride']) + 1
+            # calculates the size after max pooling
             current_size = (current_size - config['pooling_size']) // config['pooling_size'] + 1
+        
+        # calculates the input size for the fully connected layer
         fc_input_size = current_size * config['out_channels']
-        print(fc_input_size)
 
+        # defines convolutional layers
         layers = []
         in_channels = config['n_sensors']
         for _ in range(config['n_layers']):
@@ -289,14 +293,20 @@ class LSTMNet(pl.LightningModule):
             ]
             in_channels = config['out_channels']
         self.conv_layers = nn.Sequential(*layers)
-        self.lstm = nn.LSTM(input_size=1, hidden_size=config['lstm_hidden'], num_layers=1, batch_first=True)
-        self.fc = nn.Linear(fc_input_size, config['num_classes'])
 
+        self.fc = nn.Linear(fc_input_size, config['num_classes'])
+        
+        # defines loss criterion and initialises variables for training curves
         self.train_loss = 0.0
         self.val_loss = 0.0
         self.val_progress = []
+        self.best_acc = 0.0
+        self.best_f1 = 0.0
 
     def forward(self, x):
+        """
+        Performs a forward pass of the defined neural network.
+        """
         x = self.conv_layers(x)
         x = torch.flatten(x, 1)
         x = self.lstm(x)
@@ -304,6 +314,13 @@ class LSTMNet(pl.LightningModule):
         return x
 
     def training_step(self, batch, batch_idx):
+        """
+        Training step for MEGConvNet.
+
+        :param batch: Batch of training data.
+        :param batch_idx: Index of the current batch.
+        :returns: loss: The training loss.
+        """
         x, y = batch
         logits = self(x)
         loss = F.cross_entropy(logits, y)
@@ -311,6 +328,13 @@ class LSTMNet(pl.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
+        """
+        Validation step for MEGConvNet.
+
+        :param batch: Batch of training data.
+        :param batch_idx: Index of the current batch.
+        :returns: loss: The validation loss.
+        """
         x, y = batch
         logits = self(x)
         loss = F.cross_entropy(logits, y)
@@ -321,14 +345,21 @@ class LSTMNet(pl.LightningModule):
         return loss
     
     def on_validation_epoch_end(self):
+        """
+        Validation callback for pl trainer.
+        Calculates and logs train loss and validation metrics.
+        """
         # calculate accuracy on full validation set
         preds = torch.cat([pred for pred, y in self.val_progress], dim=0)
         y = torch.cat([y for pred, y in self.val_progress], dim=0)
         preds = torch.argmax(preds, dim=1)
         acc = torch.sum(preds == y).item() / len(y)
         precision, recall, f1, _ = precision_recall_fscore_support(y.cpu(), preds.cpu(), average='macro')
+
+        # log metrics based on configuration settings
         if self.config['log'] in ['wandb', 'all']:
             wandb.log({'train_loss': self.train_loss, 'val_loss': self.val_loss, 'val_acc': acc, 'val_precision': precision, 'val_recall': recall, 'val_f1': f1})
+        
         if self.config['log'] in ['stdout', 'all']:
             print(f'Training loss: {self.train_loss}')
             print(f'Validation accuracy: {acc}')
@@ -336,6 +367,17 @@ class LSTMNet(pl.LightningModule):
             print(f'Validation precision: {precision}')
             print(f'Validation recall: {recall}')
             print(f'Validation f1: {f1}')
+        
+        # saved best model, based on chosen target metric if save_best is set to True
+        if self.config['save_best']:
+            if self.config['target_metric'] == 'accuracy' and acc > self.best_acc:
+                self.best_acc = acc
+                save_checkpoint(self, 'weights/'+self.config['run_name']+'.pth')
+            elif self.config['target_metric'] == 'f1' and f1 > self.best_f1:
+                self.best_f1 = f1
+                save_checkpoint(self, 'weights/'+self.config['run_name']+'.pth')
+        
+         # reset variables for next epoch
         self.val_progress = []
         self.val_loss = 0.0
         self.train_loss = 0.0

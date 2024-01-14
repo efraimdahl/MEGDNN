@@ -3,6 +3,8 @@ from models import MEGConvNet, MEGNet, LSTMNet, load_checkpoint, save_checkpoint
 from sklearn.preprocessing import StandardScaler
 from torch.utils.data import DataLoader
 import pytorch_lightning as pl
+import torch
+import numpy as np
 import argparse
 import wandb
 import yaml
@@ -38,6 +40,11 @@ if __name__ == '__main__':
     if not os.path.exists('weights'):
         os.makedirs('weights')
 
+    if torch.cuda.is_available(): 
+        device = torch.device("cuda:0")
+        print(f"GPU available: {device}")
+    else:
+        device = torch.device("cpu")
 
     # preprocess data and train model on intra-subject data
     if 'intra' in config['validation']:
@@ -69,7 +76,10 @@ if __name__ == '__main__':
             X_train, y_train = batchify_activity(X_train, y_train, window_size = config['window_size'])
             X_test, y_test = batchify_activity(X_test, y_test, window_size = config['window_size'])
         
-        if config['model'] != 'MEGConvNet' and config['model']!="LSTMNet":
+        if config['model'] == "LSTMNet":
+            X_train = np.transpose(np.array(X_train), (0, 2, 1))
+            X_test = np.transpose(np.array(X_test), (0, 2, 1))    
+        elif config['model'] != 'MEGConvNet':
             X_train = [x.flatten() for x in X_train]
             X_test = [x.flatten() for x in X_test]
         
@@ -87,6 +97,7 @@ if __name__ == '__main__':
             model = MEGNet(config)
         elif config['model'] == "LSTMNet":
             model = LSTMNet(config)
+        model = model.to(device)
         
         #Gives the output of the models and logs them to wandb
         print(f"model: {config['model']}")
@@ -147,8 +158,11 @@ if __name__ == '__main__':
             X_train, y_train = batchify_activity(X_train, y_train, window_size = config['window_size'])
             X_test_merged, y_test_merged = batchify_activity(X_test_merged, y_test_merged, window_size = config['window_size'])
         
-        # Flattens the data
-        if config['model'] != 'MEGConvNet' and config['model']!="LSTMNet":
+        
+        if config['model'] == "LSTMNet":
+            X_train = np.transpose(np.array(X_train), (0, 2, 1))
+            X_test_merged = np.transpose(np.array(X_test_merged), (0, 2, 1))    
+        elif config['model'] != 'MEGConvNet': # Flattens the data for linear model
             X_train = [x.flatten() for x in X_train]
             X_test_merged = [x.flatten() for x in X_test_merged]
         
@@ -166,6 +180,7 @@ if __name__ == '__main__':
             model = MEGNet(config)
         elif config['model'] == 'LSTMNet':
             model = LSTMNet(config)
+        model = model.to(device)
         
         #Gives the output of the models and logs them to wandb
         print(f"model: {config['model']}")

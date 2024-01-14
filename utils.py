@@ -71,7 +71,10 @@ class MEGDataset(Dataset):
         :param labels: List of corresponding labels for each matrix.
         :param transform: A transformation to be applied to the matrix data.
         """
-        self.matrices = matrices
+        self.matrices = torch.from_numpy(np.array(matrices)).float()
+        if torch.cuda.is_available(): 
+            device = torch.device("cuda:0")
+            self.matrices = self.matrices.to(device)
         self.labels = labels
         self.transform = transform
     
@@ -81,7 +84,7 @@ class MEGDataset(Dataset):
     
     def __getitem__(self, idx):
         # read matrix and label, turn to torch tensor, apply transformation if needed
-        matrix = torch.from_numpy(self.matrices[idx]).float()
+        matrix = self.matrices[idx]
         label = self.labels[idx]
         if self.transform:
             matrix = self.transform(matrix)
@@ -130,6 +133,7 @@ def temporal_downsampling(data, downsample_factor=5):
     return downsampled_data
 
 
+
 def batchify_activity(X, y, window_size = 200):
     """
     Creates batches of activity from the MEG data.
@@ -145,10 +149,16 @@ def batchify_activity(X, y, window_size = 200):
 
         # Compute the number of batches that can be created from the sample
         n_batches = sample.shape[1] // window_size
+        remainder = sample.shape[1] % window_size
 
         # Create batches
         for j in range(n_batches):
             X_batched.append(sample[:, j * window_size:(j + 1) * window_size])
+            y_batched.append(y[i])
+
+        if remainder > 0:
+            padding = np.zeros((sample.shape[0], window_size - remainder))
+            X_batched.append(np.concatenate([sample[:, -remainder:], padding], axis=1))
             y_batched.append(y[i])
 
     return X_batched, y_batched 
@@ -169,7 +179,9 @@ def error_analysis(model, data, encoder_dict, config):
         X = temporal_downsampling(X_scaled, downsample_factor=config['downsample'])
         if config['window_size'] != -1:
             X, y = batchify_activity(X, y, window_size = config['window_size'])
-        if config['model'] != 'MEGConvNet':
+        if config['model'] == 'LSTMNet':
+            X = np.transpose(np.array(X), (0, 2, 1))
+        elif config['model'] != 'MEGConvNet':
             X = [x.flatten() for x in X]
         test_set = MEGDataset(X, y)
         test_loader = DataLoader(test_set, batch_size=config['batch_size'])

@@ -1,0 +1,24 @@
+model: MEGNet # MEGNet, MEGConvNet
+data_dir: /Users/timofeysenchenko/UU/projects/MEG/MEGDNN/Final Project data
+log: wandb  # wandb, stdout, both
+wandb_api_key: 4db50afc0625bffece93d0ab9edb0e63c4728018
+validation: [cross] # [cross, intra], [cross], [intra]
+save_best: True # save model based on best validation set score
+target_metric: accuracy  # save based on: accuracy / f1
+log_best: True # log best score in the end of the run
+error_analysis: True
+n_sensors: 248
+n_timesteps: 35624
+downsample: 5
+window_size: 2000
+hidden_size: 256
+negative_slope: 0.01
+dropout: 0.4
+n_layers: 1
+num_classes: 4
+lr: 0.0005
+warmup_epochs: 5
+epochs: 25
+steps_per_epoch: 2
+batch_size: 16
+#

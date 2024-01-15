@@ -1,0 +1,29 @@
+model: LSTMNet
+data_dir: C:/UU/23block2/PR/project/data #/Users/timofeysenchenko/UU/projects/MEG/MEGDNN/Final Project data
+log: wandb
+wandb_api_key: ecb5972e7a9513b82eaf01e65da755be0c97f55a #8f4e2a7562f1053ad39473318b8b5630d262a195  #4db50afc0625bffece93d0ab9edb0e63c4728018
+validation: [cross]
+save_best: True # save model based on best validation set score
+target_metric: accuracy  # save based on: accuracy / f1
+log_best: True # log best score in the end of the run
+error_analysis: False 
+n_sensors: 248 
+n_timesteps: 35624
+downsample: 4
+window_size: 800
+out_channels: 64
+kernel_size: 5
+stride: 1
+padding: 0
+negative_slope: 0.01 
+pooling_size: 2
+num_classes: 4
+n_layers: 4
+lr: 0.0002
+warmup_epochs: 5
+epochs: 60
+steps_per_epoch: 2
+batch_size: 8
+lstm_hidden_size: 800
+name: lstm
+#

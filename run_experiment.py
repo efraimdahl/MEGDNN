@@ -1,7 +1,7 @@
 from utils import read_datasets, MEGDataset, fit_transform_scaler, temporal_downsampling, batchify_activity, error_analysis
 from models import MEGConvNet, MEGNet, LSTMNet, load_checkpoint, save_checkpoint
 from sklearn.preprocessing import StandardScaler
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, random_split
 import pytorch_lightning as pl
 import torch
 import numpy as np
@@ -21,6 +21,8 @@ if __name__ == '__main__':
         config = yaml.safe_load(f)
         print(f'successfully loaded config file {args.config}')
     
+    torch.manual_seed(config['seed'])
+
     # read datasets
     # creating a dictionary to encode the different tasks
     data = read_datasets(config['data_dir'])
@@ -40,11 +42,6 @@ if __name__ == '__main__':
     if not os.path.exists('weights'):
         os.makedirs('weights')
 
-    if torch.cuda.is_available(): 
-        device = torch.device("cuda:0")
-        print(f"GPU available: {device}")
-    else:
-        device = torch.device("cpu")
 
     # preprocess data and train model on intra-subject data
     if 'intra' in config['validation']:
@@ -85,10 +82,15 @@ if __name__ == '__main__':
         
         # defines the training and validation sets
         train_set = MEGDataset(X_train, y_train)
-        val_set = MEGDataset(X_test, y_test)
+        total_size = len(train_set)
+        train_size = int((1 - config['val_size']) * total_size)
+        val_size = total_size - train_size
+        train_set, val_set = random_split(train_set, [train_size, val_size])
+        test_set = MEGDataset(X_test, y_test)
 
         train_loader = DataLoader(train_set, batch_size=config['batch_size'], shuffle=True)
         val_loader = DataLoader(val_set, batch_size=config['batch_size'])
+        test_loader = DataLoader(test_set, batch_size=config['batch_size'])
 
         # initialize the model based on the config file
         if config['model'] == 'MEGConvNet':
@@ -97,7 +99,6 @@ if __name__ == '__main__':
             model = MEGNet(config)
         elif config['model'] == "LSTMNet":
             model = LSTMNet(config)
-        model = model.to(device)
         
         #Gives the output of the models and logs them to wandb
         print(f"model: {config['model']}")
@@ -115,17 +116,16 @@ if __name__ == '__main__':
                 wandb.log({'INTRA best f1': model.best_f1})
         if not config['save_best']:
             save_checkpoint(model, 'weights/'+run_name+'.pth')
+        trainer.test(model, test_loader)
         wandb.finish()
     
     # preprocess data and train model on cross-subject data
     if 'cross' in config['validation']:
         if config['log'] in ['wandb', 'all']:
             # initialize wandb
+        if config['log'] in ['wandb', 'all']:
             print('Input wandb run name for cross-subject run:')
-            if(config["name"]):
-                run_name=config["name"]
-            else:
-                run_name = input()
+            run_name = input()
             run_name = 'cross_'+run_name
             config['run_name'] = run_name
             wandb.init(project='MEG', config=config, name = run_name)
@@ -168,10 +168,15 @@ if __name__ == '__main__':
         
         # defines the training and validation sets
         train_set = MEGDataset(X_train, y_train)
-        val_set = MEGDataset(X_test_merged, y_test_merged)
+        total_size = len(train_set)
+        train_size = int((1 - config['val_size']) * total_size)
+        val_size = total_size - train_size
+        train_set, val_set = random_split(train_set, [train_size, val_size])
+        test_set = MEGDataset(X_test_merged, y_test_merged)
 
         train_loader = DataLoader(train_set, batch_size=config['batch_size'], shuffle=True)
         val_loader = DataLoader(val_set, batch_size=config['batch_size'])
+        test_loader = DataLoader(test_set, batch_size=config['batch_size'])
 
         # initialize the model based on the config file
         if config['model'] == 'MEGConvNet':
@@ -180,7 +185,6 @@ if __name__ == '__main__':
             model = MEGNet(config)
         elif config['model'] == 'LSTMNet':
             model = LSTMNet(config)
-        model = model.to(device)
         
         #Gives the output of the models and logs them to wandb
         print(f"model: {config['model']}")
@@ -196,9 +200,9 @@ if __name__ == '__main__':
         # logs best accuracy or f1 score
         if config['log_best']:
             if config['target_metric'] == 'accuracy':
-                wandb.log({'CROSS best accuracy': model.best_acc})
+                wandb.log({'CROSS best val accuracy': model.best_acc})
             elif config['target_metric'] == 'f1':
-                wandb.log({'CROSS best f1': model.best_f1})
+                wandb.log({'CROSS best val f1': model.best_f1})
         if not config['save_best']:
             save_checkpoint(model, 'weights/'+run_name+'.pth')
         
@@ -207,5 +211,6 @@ if __name__ == '__main__':
             # if save_best is true, load the best model for validation
             if config['save_best']:
                 load_checkpoint(model, 'weights/'+run_name+'.pth')
+            trainer.test(model, test_loader)
             error_analysis(model, data, encoder_dict, config)
         wandb.finish()

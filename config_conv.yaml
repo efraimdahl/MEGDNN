@@ -10,7 +10,7 @@ error_analysis: True
 n_sensors: 248
 n_timesteps: 35624
 downsample: 5
-window_size: 2000
+window_size: 500
 out_channels: 64
 kernel_size: 3
 stride: 1
@@ -18,9 +18,15 @@ padding: 0
 negative_slope: 0.01
 pooling_size: 2
 num_classes: 4
-n_layers: 2
-lr: 0.001
+n_layers: 3
+final_block_size: 2 # if 1 - simple linear layer, if 2 2 linear layers with batchnorm, leakyrelu and dropout in between
+hidden_size: 128 # if final_block_size == 2
+dropout: 0.5 # if final_block_size == 2
+lr: 0.0001
+weight_decay: 0.0001
+val_size: 0.2
 warmup_epochs: 5
-epochs: 20
+epochs: 25
 steps_per_epoch: 2
 batch_size: 16
+seed: 42

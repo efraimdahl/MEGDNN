@@ -7,11 +7,7 @@ import wandb
 from torch.autograd import Variable
 
 
-class MEGNet(pl.LightningModule):
-    """
-    MEGNet is a Multilayer Perceptron, it only consists of linear layers.
-    To these layers, we have applied batch normalisation, leaky ReLU activation and dropout.
-    """
+lass MEGNet(pl.LightningModule):
     def __init__(self, config):
         super(MEGNet, self).__init__()
         self.config = config
@@ -40,6 +36,7 @@ class MEGNet(pl.LightningModule):
         self.train_loss = 0.0
         self.val_loss = 0.0
         self.val_progress = []
+        self.test_progress = []
         self.best_acc = 0.0
         self.best_f1 = 0.0
 
@@ -99,7 +96,6 @@ class MEGNet(pl.LightningModule):
         # log metrics based on configuration settings
         if self.config['log'] in ['wandb', 'all']:
             wandb.log({'train_loss': self.train_loss, 'val_loss': self.val_loss, 'val_acc': acc, 'val_precision': precision, 'val_recall': recall, 'val_f1': f1})
-        
         if self.config['log'] in ['stdout', 'all']:
             print(f'Training loss: {self.train_loss}')
             print(f'Validation accuracy: {acc}')
@@ -110,10 +106,10 @@ class MEGNet(pl.LightningModule):
         
         # saved best model, based on chosen target metric if save_best is set to True
         if self.config['save_best']:
-            if self.config['target_metric'] == 'accuracy' and acc > self.best_acc:
+            if self.config['target_metric'] == 'accuracy' and acc >= self.best_acc:
                 self.best_acc = acc
                 save_checkpoint(self, 'weights/'+self.config['run_name']+'.pth')
-            elif self.config['target_metric'] == 'f1' and f1 > self.best_f1:
+            elif self.config['target_metric'] == 'f1' and f1 >= self.best_f1:
                 self.best_f1 = f1
                 save_checkpoint(self, 'weights/'+self.config['run_name']+'.pth')
         
@@ -122,9 +118,50 @@ class MEGNet(pl.LightningModule):
         self.val_loss = 0.0
         self.train_loss = 0.0
     
+
+    def test_step(self, batch, batch_idx):
+        """
+        Test step for MEGConvNet.
+
+        :param batch: Batch of training data.
+        :param batch_idx: Index of the current batch.
+        :returns: loss: The test loss.
+        """
+        x, y = batch
+        logits = self(x)
+        loss = F.cross_entropy(logits, y)
+        self.log('test_loss', loss)
+        pred = F.softmax(logits, dim=1)
+        self.test_progress.append((pred, y))
+        return loss
+    
+    def on_test_epoch_end(self):
+        """
+        Test callback for pl trainer.
+        Calculates and logs test metrics.
+        """
+        # calculate accuracy on full test set
+        preds = torch.cat([pred for pred, y in self.test_progress], dim=0)
+        y = torch.cat([y for pred, y in self.test_progress], dim=0)
+        preds = torch.argmax(preds, dim=1)
+        acc = torch.sum(preds == y).item() / len(y)
+        precision, recall, f1, _ = precision_recall_fscore_support(y.cpu(), preds.cpu(), average='macro')
+
+        # log metrics based on configuration settings
+        if self.config['log'] in ['wandb', 'all']:
+            wandb.log({'test_acc': acc, 'test_precision': precision, 'test_recall': recall, 'test_f1': f1})
+        if self.config['log'] in ['stdout', 'all']:
+            print(f'Test accuracy: {acc}')
+            print(f'Test precision: {precision}')
+            print(f'Test recall: {recall}')
+            print(f'Test f1: {f1}')
+        
+        # reset variables for next epoch
+        self.test_progress = []
+    
     def configure_optimizers(self):
         # initialize Adam optimizer and scheduler with warmup
-        self.optimizer = torch.optim.Adam(self.parameters(), lr=self.config['lr'])
+        self.optimizer = torch.optim.Adam(self.parameters(), lr=self.config['lr'], weight_decay=self.config['weight_decay'])
         self.scheduler = torch.optim.lr_scheduler.OneCycleLR(self.optimizer, max_lr=self.config['lr'], steps_per_epoch=self.config['steps_per_epoch'], epochs=self.config['epochs'])
         return [self.optimizer], [self.scheduler]
 
@@ -137,7 +174,7 @@ class MEGConvNet(pl.LightningModule):
         super(MEGConvNet, self).__init__()
         self.config = config
 
-        # calculates input size for the final fully connected layer
+        # calculate input size for the final fully connected layer
         if config['window_size'] != -1:
             input_size = config['window_size']
         else:
@@ -168,12 +205,22 @@ class MEGConvNet(pl.LightningModule):
         self.conv_layers = nn.Sequential(*layers)
 
         # defines final fully connected layer
-        self.fc = nn.Linear(fc_input_size, config['num_classes'])
+        if config['final_block_size'] == 1:
+            self.fc = nn.Linear(fc_input_size, config['num_classes'])
+        elif config['final_block_size'] == 2:
+            self.fc = nn.Sequential(
+                nn.Linear(fc_input_size, config['hidden_size']),
+                nn.BatchNorm1d(config['hidden_size']),
+                nn.LeakyReLU(negative_slope=config['negative_slope']),
+                nn.Dropout(config['dropout']),
+                nn.Linear(config['hidden_size'], config['num_classes'])
+            )
         
         # defines loss criterion and initialises variables for training curves
         self.train_loss = 0.0
         self.val_loss = 0.0
         self.val_progress = []
+        self.test_progress = []
         self.best_acc = 0.0
         self.best_f1 = 0.0
 
@@ -232,7 +279,6 @@ class MEGConvNet(pl.LightningModule):
         # log metrics based on configuration settings
         if self.config['log'] in ['wandb', 'all']:
             wandb.log({'train_loss': self.train_loss, 'val_loss': self.val_loss, 'val_acc': acc, 'val_precision': precision, 'val_recall': recall, 'val_f1': f1})
-        
         if self.config['log'] in ['stdout', 'all']:
             print(f'Training loss: {self.train_loss}')
             print(f'Validation accuracy: {acc}')
@@ -243,10 +289,10 @@ class MEGConvNet(pl.LightningModule):
         
         # saved best model, based on chosen target metric if save_best is set to True
         if self.config['save_best']:
-            if self.config['target_metric'] == 'accuracy' and acc > self.best_acc:
+            if self.config['target_metric'] == 'accuracy' and acc >= self.best_acc:
                 self.best_acc = acc
                 save_checkpoint(self, 'weights/'+self.config['run_name']+'.pth')
-            elif self.config['target_metric'] == 'f1' and f1 > self.best_f1:
+            elif self.config['target_metric'] == 'f1' and f1 >= self.best_f1:
                 self.best_f1 = f1
                 save_checkpoint(self, 'weights/'+self.config['run_name']+'.pth')
         
@@ -254,10 +300,51 @@ class MEGConvNet(pl.LightningModule):
         self.val_progress = []
         self.val_loss = 0.0
         self.train_loss = 0.0
+    
+    def test_step(self, batch, batch_idx):
+        """
+        Test step for MEGConvNet.
+
+        :param batch: Batch of training data.
+        :param batch_idx: Index of the current batch.
+        :returns: loss: The test loss.
+        """
+        x, y = batch
+        logits = self(x)
+        loss = F.cross_entropy(logits, y)
+        self.log('test_loss', loss)
+        pred = F.softmax(logits, dim=1)
+        self.test_progress.append((pred, y))
+        return loss
+    
+    def on_test_epoch_end(self):
+        """
+        Test callback for pl trainer.
+        Calculates and logs test metrics.
+        """
+        # calculate accuracy on full test set
+        preds = torch.cat([pred for pred, y in self.test_progress], dim=0)
+        y = torch.cat([y for pred, y in self.test_progress], dim=0)
+        preds = torch.argmax(preds, dim=1)
+        acc = torch.sum(preds == y).item() / len(y)
+        precision, recall, f1, _ = precision_recall_fscore_support(y.cpu(), preds.cpu(), average='macro')
+
+        # log metrics based on configuration settings
+        if self.config['log'] in ['wandb', 'all']:
+            wandb.log({'test_acc': acc, 'test_precision': precision, 'test_recall': recall, 'test_f1': f1})
+        if self.config['log'] in ['stdout', 'all']:
+            print(f'Test accuracy: {acc}')
+            print(f'Test precision: {precision}')
+            print(f'Test recall: {recall}')
+            print(f'Test f1: {f1}')
+        
+        # reset variables for next epoch
+        self.test_progress = []
+
 
     def configure_optimizers(self):
         # initialize Adam optimizer and scheduler with warmup
-        self.optimizer = torch.optim.Adam(self.parameters(), lr=self.config['lr'])
+        self.optimizer = torch.optim.Adam(self.parameters(), lr=self.config['lr'], weight_decay=self.config['weight_decay'])
         self.scheduler = torch.optim.lr_scheduler.OneCycleLR(self.optimizer, max_lr=self.config['lr'], steps_per_epoch=self.config['steps_per_epoch'], epochs=self.config['epochs'])
         return [self.optimizer], [self.scheduler]
 
